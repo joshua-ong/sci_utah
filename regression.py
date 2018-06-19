@@ -11,7 +11,7 @@ import torch.optim
 import torch.utils.data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-import regression_vgg as vgg
+import regression_vgg2 as vgg
 import numpy as np
 
 model_names = sorted(name for name in vgg.__dict__
@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='vgg16_bn',
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) +
-                    ' (default: vgg16_bn)')
+                    ' (default: vgg19)')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
                     help='number of data loading workers (default: 0)')
 parser.add_argument('--epochs', default=10, type=int, metavar='N',
@@ -33,7 +33,7 @@ parser.add_argument('--epochs', default=10, type=int, metavar='N',
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('-b', '--batch-size', default=32, type=int,
-                    metavar='N', help='mini-batch size (default: 32)')
+                    metavar='N', help='mini-batch size (default: 128)')
 parser.add_argument('--lr', '--learning-rate', default=5e-3, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.8, type=float, metavar='M',
@@ -65,25 +65,24 @@ parser.add_argument('--gpu-flag', dest='gpu_on',
 ###############################################################################
 best_prec1 = 0
 def main():
-    #start up jargon for parser
     global args, best_prec1
     args = parser.parse_args()
     
-    #text file for logging (smaller than saving model params)
-    with open(args.save_dir, "w") as text_file: 
+    with open(args.save_dir, "w") as text_file: #text file for logging (smaller than saving model params)
         text_file.write(str(args))
 
     # Check the save_dir exists or not
-    if not os.path.exists(args.model_dir):
-        os.makedirs(args.model_dir)
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir)
 
     model = vgg.__dict__[args.arch]()
 
     model.features = torch.nn.DataParallel(model.features) #turn on parallel gpu
-    if(args.gpu_on): #print at the begining of a run to confirm setting
+    if(args.gpu_on): #print at the begging of a run to confirm setting
         print(torch.cuda.is_available())
         print(args)
         model.cuda()
+
     #cudnn.benchmark = True #optimizes for single test, so it is bad for hyper param optimization
     
 ###############################################################################    
@@ -112,11 +111,7 @@ def main():
     if(args.gpu_on):
         criterion = nn.MSELoss(size_average=False).cuda()
     else:
-        criterion = nn.MSELoss(size_average=False)  
-        
-    if args.half:
-        model.half()
-        criterion.half()
+        criterion = nn.MSELoss(size_average=False)
 
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
@@ -144,10 +139,9 @@ def main():
                'best_prec1': best_prec1,
            }, is_best, filename=os.path.join(args.model_dir, 'checkpoint_{}.tar'.format(epoch)))
 
-###############################################################################    
+###############################################################################     
     #my final accuracy measure over all of the eval set    
     #accuracy_final(val_loader,model) 
-
 
 def train(train_loader, model, criterion, optimizer, epoch):
     """
@@ -164,21 +158,19 @@ def train(train_loader, model, criterion, optimizer, epoch):
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
 
-        data_time.update(time.time() - end) # measure data loading time
-        if(args.gpu_on): #switch to use gpu or cpu
+        # measure data loading time
+        data_time.update(time.time() - end)
+        if(args.gpu_on):
             target = target.cuda(async=True)
             input_var = torch.autograd.Variable(input) .cuda()
         else:
             input_var = torch.autograd.Variable(input)
-        #target =  targetClassToTemp(target)   
         target_var = torch.autograd.Variable(target)
         if args.half:
             input_var = input_var.half()
 
-        # heavy lifting
+        # compute output
         output = model(input_var)
-        #output = torch.sum(output,1) #sum fc layers
-        #output = output.view(-1,1)
         target_var = target_var.float()
         target_var = target_var.view(-1,1)
         loss = criterion(output, target_var)
@@ -237,20 +229,20 @@ def validate(val_loader, model, criterion):
             if(args.gpu_on):
                 target = target.cuda(async=True)
                 input_var = torch.autograd.Variable(input) .cuda()
+                #input_var = torch.cuda()
+                #torch.autograd.Variable(input, volatile=True).cuda()
             else:
                 input_var = torch.autograd.Variable(input)
-
-            #target =  targetClassToTemp(target)
+                #torch.autograd.Variable(input, volatile=True) 
+            
+            #target_var = torch.no_grad #torch.autograd.Variable(target, volatile=True)
             target_var = torch.autograd.Variable(target)
             
             if args.half:
                 input_var = input_var.half()
     
-            #heavy lifting
+            # heavy lifting
             output = model(input_var)
-            #output = torch.sum(output,1) #sum fc layers
-            #output = output.view(-1,1)
-            
             target_var = target_var.float()
             target_var = target_var.view(-1,1)
             loss = criterion(output, target_var)
@@ -375,18 +367,6 @@ def accuracy_final(val_loader, model)  :
                             'Accuracy of Class 2 {}\t'
                             'Total accuracy of Class{}\t'.format((tp[0] / total[0]),(tp[1] / total[1]),z)
                             )                                                          
-
-def targetClassToTemp(target):
-    """ 
-    0 1 2 3 4 class scores to
-    600 - 800 kelvin
-    """
-    target = target.numpy()
-    for i in range(0,target.size):
-        target[i] = target[i] * 50 + 600
-        #print(target[i])
-    target = torch.from_numpy(target)
-    return target
 
 def printnorm(self, input, output):
     # input is a tuple of packed inputs
